@@ -1,0 +1,42 @@
+comment pcl depend in manifest
+in CMakeListe.txt		remove find_package(libg2o REQUIRED)
+						change  #~ SET(G2O_LIBS ${libg2o_LIBRARIES} cholmod cxsparse)
+								#~ Changed
+								SET(G2O_LIBS cholmod cxsparse -lg2o_cli -lg2o_core
+								-lg2o_csparse_extension -lg2o_ext_freeglut_minimal -lg2o_incremental
+								-lg2o_interactive -lg2o_interface -lg2o_opengl_helper -lg2o_parser
+								-lg2o_simulator -lg2o_solver_cholmod -lg2o_solver_csparse
+								-lg2o_solver_dense -lg2o_solver_pcg -lg2o_solver_slam2d_linear
+								-lg2o_solver_structure_only -lg2o_stuff -lg2o_types_data -lg2o_types_icp
+								-lg2o_types_sba -lg2o_types_sclam2d -lg2o_types_sim3 -lg2o_types_slam2d
+								-lg2o_types_slam3d)
+in ColorOctomapServer.h change #include <octomap_ros/OctomapROS.h> to #include "octomap_ros/conversions.h"
+                        change octomap::OctomapROS<octomap::ColorOcTree> m_octoMap; to octomap::ColorOcTree m_octoMap;
+                        m_octoMap.octree. to m_octoMap.
+                        
+                        change
+                          m_octoMap.insertScan(*pcl_cloud, origin, max_range, true, true);
+                        to
+                          octomap::Pointcloud octomapCloud;
+						  octomap::pointcloudPCLToOctomap(*pcl_cloud, octomapCloud);
+						  m_octoMap.insertScan(octomapCloud, octomap::pointMsgToOctomap(origin), max_range, true, true); 
+                        
+in openni_listener.cpp
+                        remove #include "pcl/ros/conversions.h"
+                        in line 565 change retrieveTransformations(point_cloud->header, node_ptr); to 
+										   retrieveTransformations(pcl_conversions::fromPCL(point_cloud->header), node_ptr);
+										   
+in node.cpp 			add #include <pcl_conversions/pcl_conversions.h>
+						change point_cloud->header toi pcl_conversions::fromPCL(point_cloud->header)
+in graph_manage.cpp and graph_mgr_io.cpp
+						change pc_col->header to pcl_conversions::fromPCL(pc_col->header) //all pcl headers (problem with stamp type which is not ros::Time)
+						
+in glviewer.cpp
+						add #include <pcl/common/distances.h>
+						
+in misc.cpp 			
+						remove #include <pcl/ros/conversions.h>
+						add <pcl/common/distances.h>
+						add #include <pcl_conversions/pcl_conversions.h>
+						use pcl_conversions::fromPCL() when needed
+
