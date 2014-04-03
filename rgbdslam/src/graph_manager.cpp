@@ -91,7 +91,7 @@ GraphManager::GraphManager() :
   std::string fixed_frame = ParameterServer::instance()->get<std::string>("fixed_frame_name");
   std::string base_frame  = ParameterServer::instance()->get<std::string>("base_frame_name");
     
-  latest_transform_cache_ = tf::StampedTransform(tf::Transform::getIdentity(), ros::Time::now(), base_frame, fixed_frame);
+  latest_transform_cache_ = tf::StampedTransform(tf::Transform::getIdentity(), ros::Time::now(), base_frame, "/base_footprint");//vagelas
   timer_ = nh.createTimer(ros::Duration(0.1), &GraphManager::broadcastLatestTransform, this);
 }
 
@@ -244,14 +244,14 @@ QList<int> GraphManager::getPotentialEdgeTargetsWithDijkstra(const Node* new_nod
           id = vertex_id_to_node_id.at(vid);
         }
         catch (std::exception e){//Catch exceptions: Unexpected problems shouldn't crash the application
-          ROS_ERROR("Vertex ID %d has no corresponding node", vid);
-          ROS_ERROR("Map Content:");
+          //~ ROS_ERROR("Vertex ID %d has no corresponding node", vid);
+          //~ ROS_ERROR("Map Content:");
           for(std::map<int,int>::const_iterator it = vertex_id_to_node_id.begin(); it != vertex_id_to_node_id.end(); it++){
-            ROS_ERROR("Node ID %d: Vertex ID %d", it->first, it->second);
+            //~ ROS_ERROR("Node ID %d: Vertex ID %d", it->first, it->second);
           }
           for(g2o::SparseOptimizer::VertexIDMap::iterator it = optimizer_->vertices().begin(); it != optimizer_->vertices().end(); it++)
           {
-            ROS_ERROR("Vertex ID %d", it->first);
+            //~ ROS_ERROR("Vertex ID %d", it->first);
           }
         }
         if(!graph_.at(id)->matchable_) continue;
@@ -729,6 +729,10 @@ bool GraphManager::addNode(Node* new_node)
       //The transform will get updated when optimizeGraph finishes
       pointcloud_type* cloud_to_visualize = new_node->pc_col.get();
       std_vector_of_eigen_vector4f * features_to_visualize = &(new_node->feature_locations_3d_);
+      //pandora ? double broadcast ?
+      tf::StampedTransform base_to_fixed = computeFixedToBaseTransform(new_node, true);
+      br_.sendTransform(base_to_fixed);
+      publishCloud(new_node, base_to_fixed.stamp_, batch_cloud_pub_);
       if(!new_node->valid_tf_estimate_) {
         cloud_to_visualize = new pointcloud_type();
         features_to_visualize = new std_vector_of_eigen_vector4f();

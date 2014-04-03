@@ -1,0 +1,37 @@
+<!-- This file demonstrates the parameterization for a computer with low performance
+     The openni driver is ΝΟΤ started from this file -->
+<launch>
+	<node pkg="rgbdslam" type="rgbdslam" name="rgbdslam" cwd="node" required="true"> 
+		<!-- Input data settings-->
+		<param name="config/topic_image_mono"              value="/image_converter/image"/> <!--could also be color -->
+		<param name="config/topic_image_depth"             value="/image_converter/depth/image"/>
+		<param name="config/topic_points"                  value=""/> <!--if empty, poincloud will be reconstructed from image and depth -->
+		<param name="config/camera_info_topic"             value="/kinect/camera_info"/>
+		<param name="config/base_frame_name"               value="/kinect_camera"/>
+
+		<param name="config/feature_detector_type"         value="ORB"/><!-- ORB are fastest and require no GPU -->
+		<param name="config/feature_extractor_type"        value="ORB"/><!-- ORB are fastest and require no GPU --> 
+		<param name="config/matcher_type"                  value="BRUTEFORCE"/> <!-- FLANN (not avail for ORB features), SIFTGPU (only for SIFTGPU detector)  or BRUTEFORCE-->    
+
+		<param name="config/max_keypoints"                 value="700"/><!-- Extract no more than this many keypoints (not honored by SIFTGPU)-->
+
+		<param name="config/min_sampled_candidates"        value="5"/><!-- Frame-to-frame comparisons to random frames-->
+		<param name="config/nn_distance_ratio"             value="1"/><!-- Frame-to-frame comparisons to random frames-->
+
+		<param name="config/store_pointclouds"             value="true"/> <!-- if, e.g., only trajectory is required, setting this to false saves lots of memory -->
+
+		<param name="config/data_skip_step"                value="2"/><!-- skip every n-th frame completely -->
+		<param name="config/optimizer_skip_step"           value="1"/><!-- optimize every n-th frame. Set high for offline operation -->
+		<param name="config/backend_solver"                value="pcg"/> <!-- pcg is fast and good for online operation -->
+		<param name="config/cloud_creation_skip_step"      value="1"/> <!-- Subsample point cloud during creation: Makes creation and EMM faster, requires less storage -->
+		<param name="config/visualization_skip_step"       value="1"/> <!-- Increase this if 3D rendering in GUI is still to slow-->
+		<param name="config/octomap_resolution"            value="0.05"/><!-- 5 cm resolution renders fast enough for small maps -->
+		<param name="config/maximum_depth"                 value="3.0"/><!-- Do not render points further than 3 meter in GUI and Octomap-->
+		<param name="config/optimize_landmarks"            value="true"/> <!-- Include feature poses as vertices in graph optimization-->
+		<param name="config/use_icp"                       value="true"/> <!-- Ignored if ICP is not compiled in (see top of CMakeLists.txt) -->
+		
+		<param name="config/individual_cloud_out_topic"    value="/rgbdslam/batch_clouds"/>;
+	</node>
+	
+	<node pkg="rgbdslam" type="image_converter" name="image_converter" required="true"/> 
+</launch>

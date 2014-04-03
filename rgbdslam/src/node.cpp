@@ -23,10 +23,6 @@
 #include <pcl/common/transformation_from_correspondences.h>
 #include <pcl_conversions/pcl_conversions.h>
 
-#ifdef USE_SIFT_GPU
-#include "sift_gpu_wrapper.h"
-#endif
-
 #include <fstream>
 
 #include "misc.h"
@@ -89,16 +85,6 @@ Node::Node(const cv::Mat& visual,
     gray_img = visual;
   }
 
-
-#ifdef USE_SIFT_GPU
-  std::vector<float> descriptors;
-  if(ps->get<std::string>("feature_detector_type") == "SIFTGPU"){
-    ScopedTimer s("Feature Detection and Descriptor Extraction");
-    SiftGPUWrapper* siftgpu = SiftGPUWrapper::getInstance();
-    siftgpu->detect(gray_img, feature_locations_2d_, descriptors);
-    ROS_WARN_COND(descriptors.size()==0, "No keypoints for current image!");
-  } else 
-#endif
   {
     ScopedTimer s("Feature Detection");
     ROS_FATAL_COND(detector.empty(), "No valid detector!");
@@ -106,13 +92,6 @@ Node::Node(const cv::Mat& visual,
   }
 
   // project pixels to 3dPositions and create search structures for the gicp
-#ifdef USE_SIFT_GPU
-  if(ps->get<std::string>("feature_detector_type") == "SIFTGPU" 
-     && descriptors.size() > 0){
-    projectTo3DSiftGPU(feature_locations_2d_, feature_locations_3d_, depth, cam_info, descriptors, feature_descriptors_); 
-  }
-  else
-#endif
   {
     projectTo3D(feature_locations_2d_, feature_locations_3d_, depth, cam_info);
     ScopedTimer s("Feature Extraction");
@@ -180,15 +159,6 @@ Node::Node(const cv::Mat visual,
   else { gray_img = visual; }
 
 
-#ifdef USE_SIFT_GPU
-  std::vector<float> descriptors;
-  if(ps->get<std::string>("feature_detector_type") == "SIFTGPU"){
-    ScopedTimer s("Feature Detection and Descriptor Extraction");
-    SiftGPUWrapper* siftgpu = SiftGPUWrapper::getInstance();
-    siftgpu->detect(gray_img, feature_locations_2d_, descriptors);
-    ROS_FATAL_COND(descriptors.size() ==0, "Can't run SiftGPU");
-  } else 
-#endif
   if(ps->get<std::string>("feature_detector_type") != "GICP")
   {
     ScopedTimer s("Feature Detection");
@@ -197,16 +167,7 @@ Node::Node(const cv::Mat visual,
   }
 
   // project pixels to 3dPositions and create search structures for the gicp
-#ifdef USE_SIFT_GPU
-  if(ps->get<std::string>("feature_detector_type") == "SIFTGPU"
-     && descriptors.size() > 0)
-  {
-    // removes also unused descriptors from the descriptors matrix
-    // build descriptor matrix and sets siftgpu_descriptors!
-    projectTo3DSiftGPU(feature_locations_2d_, feature_locations_3d_, pc_col, descriptors, feature_descriptors_); //takes less than 0.01 sec
-  }
-  else 
-#endif
+
   if(ps->get<std::string>("feature_detector_type") != "GICP")
   {
     projectTo3D(feature_locations_2d_, feature_locations_3d_, pc_col); //takes less than 0.01 sec
@@ -434,14 +395,6 @@ unsigned int Node::featureMatching(const Node* other, std::vector<cv::DMatch>* m
   if(ps->get<std::string>("feature_detector_type") == "GICP"){
     return 0;
   }
-#ifdef USE_SIFT_GPU
-  if (ps->get<std::string> ("matcher_type") == "SIFTGPU") {
-    siftgpu_mutex.lock();
-    sum_distances = SiftGPUWrapper::getInstance()->match(siftgpu_descriptors, feature_descriptors_.rows, other->siftgpu_descriptors, other->feature_descriptors_.rows, matches);
-    siftgpu_mutex.unlock();
-  }
-  else
-#endif
   //using BruteForceMatcher for ORB features
   if (ps->get<std::string> ("matcher_type") == "BRUTEFORCE" || 
       ps->get<std::string> ("feature_extractor_type") == "ORB")
@@ -574,164 +527,6 @@ unsigned int Node::featureMatching(const Node* other, std::vector<cv::DMatch>* m
   //return static_cast<float>(one_nearest_neighbour) / static_cast<float>(one_nearest_neighbour+two_nearest_neighbours);
   return matches->size();
 }
-
-
-
-#ifdef USE_SIFT_GPU
-void Node::projectTo3DSiftGPU(std::vector<cv::KeyPoint>& feature_locations_2d,
-                              std::vector<Eigen::Vector4f, Eigen::aligned_allocator<Eigen::Vector4f> >& feature_locations_3d,
-                              const cv::Mat& depth,
-                              const sensor_msgs::CameraInfoConstPtr& cam_info,
-                              std::vector<float>& descriptors_in, cv::Mat& descriptors_out)
-{
-
-  ScopedTimer s(__FUNCTION__);
-
-  double depth_scaling = ParameterServer::instance()->get<double>("depth_scaling_factor");
-  size_t max_keyp = ParameterServer::instance()->get<int>("max_keypoints");
-  float x,y;//temp point, 
-  //principal point and focal lengths:
-  ParameterServer* ps = ParameterServer::instance();
-  float fx = 1./ (ps->get<double>("depth_camera_fx") > 0 ? ps->get<double>("depth_camera_fx") : cam_info->K[0]); //(cloud->width >> 1) - 0.5f;
-  float fy = 1./ (ps->get<double>("depth_camera_fy") > 0 ? ps->get<double>("depth_camera_fy") : cam_info->K[4]); //(cloud->width >> 1) - 0.5f;
-  float cx = ps->get<double>("depth_camera_cx") > 0 ? ps->get<double>("depth_camera_cx") : cam_info->K[2]; //(cloud->width >> 1) - 0.5f;
-  float cy = ps->get<double>("depth_camera_cy") > 0 ? ps->get<double>("depth_camera_cy") : cam_info->K[5]; //(cloud->width >> 1) - 0.5f;
-  //float cx = 325.1;//cam_info->K[2]; //(cloud->width >> 1) - 0.5f;
-  //float cy = 249.7;//cam_info->K[5]; //(cloud->height >> 1) - 0.5f;
-  //float fx = 1.0/521.0;//1.0f / cam_info->K[0]; 
-  //float fy = 1.0/521.0;//1.0f / cam_info->K[4]; 
-  cv::Point2f p2d;
-
-  if(feature_locations_3d.size()){
-    ROS_INFO("There is already 3D Information in the FrameInfo, clearing it");
-    feature_locations_3d.clear();
-  }
-
-  std::list<int> featuresUsed;
-  
-  int index = -1;
-  for(unsigned int i = 0; i < feature_locations_2d.size(); /*increment at end of loop*/){
-    ++index;
-
-    p2d = feature_locations_2d[i].pt;
-    float Z;
-    if(ParameterServer::instance()->get<bool>("use_feature_min_depth")){
-      Z = getMinDepthInNeighborhood(depth, p2d, feature_locations_2d[i].size);
-    } else {
-      Z = depth.at<float>(p2d.y, p2d.x) * depth_scaling;
-    }
-    // Check for invalid measurements
-    if (std::isnan (Z))
-    {
-      ROS_DEBUG("Feature %d has been extracted at NaN depth. Using pixel coordinates", i);
-      //FIXME Use parameter here to choose whether to use
-      //FIXME Bad hack: using pixel coords
-      x = (p2d.x - cx) * 1.0 * fx;
-      y = (p2d.y - cy) * 1.0 * fy;
-      //feature_locations_2d.erase(feature_locations_2d.begin()+i);
-      //continue;
-    }
-    else
-    {
-      x = (p2d.x - cx) * Z * fx;
-      y = (p2d.y - cy) * Z * fy;
-    }
-
-    feature_locations_3d.push_back(Eigen::Vector4f(x,y, Z, 1.0));
-    featuresUsed.push_back(index);  //save id for constructing the descriptor matrix
-    i++; //Only increment if no element is removed from vector
-    if(feature_locations_3d.size() > max_keyp) break;
-  }
-
-  //create descriptor matrix
-  int size = feature_locations_3d.size();
-  descriptors_out = cv::Mat(size, 128, CV_32F);
-  siftgpu_descriptors.resize(size * 128);
-  for (int y = 0; y < size && featuresUsed.size() > 0; ++y) {
-    int id = featuresUsed.front();
-    featuresUsed.pop_front();
-
-    for (int x = 0; x < 128; ++x) {
-      descriptors_out.at<float>(y, x) = descriptors_in[id * 128 + x];
-      siftgpu_descriptors[y * 128 + x] = descriptors_in[id * 128 + x];
-    }
-  }
-
-  feature_locations_2d.resize(feature_locations_3d.size());
-  /*
-  //create descriptor matrix
-  int size = feature_locations_3d.size();
-  descriptors_out = cv::Mat(size, 128, CV_32F);
-  for (int y = 0; y < size && featuresUsed.size() > 0; ++y) {
-    int id = featuresUsed.front();
-    featuresUsed.pop_front();
-
-    for (int x = 0; x < 128; ++x) {
-      descriptors_out.at<float>(y, x) = descriptors_in[id * 128 + x];
-    }
-  }
-  */
-}
-
-void Node::projectTo3DSiftGPU(std::vector<cv::KeyPoint>& feature_locations_2d,
-                              std::vector<Eigen::Vector4f, Eigen::aligned_allocator<Eigen::Vector4f> >& feature_locations_3d,
-                              const pointcloud_type::Ptr point_cloud, 
-                              std::vector<float>& descriptors_in, cv::Mat& descriptors_out)
-{
-  ScopedTimer s(__FUNCTION__);
-  size_t max_keyp = ParameterServer::instance()->get<int>("max_keypoints");
-  cv::Point2f p2d;
-
-  if(feature_locations_3d.size()){
-    ROS_INFO("There is already 3D Information in the FrameInfo, clearing it");
-    feature_locations_3d.clear();
-  }
-
-  std::list<int> featuresUsed;
-
-  int index = -1;
-  for(unsigned int i = 0; i < feature_locations_2d.size(); /*increment at end of loop*/){
-    ++index;
-
-    p2d = feature_locations_2d[i].pt;
-    point_type p3d = point_cloud->at((int) p2d.x,(int) p2d.y);
-
-    // Check for invalid measurements
-    if (isnan(p3d.z))
-    {
-      ROS_DEBUG("Feature %d has been extracted at NaN depth. Using pixel coordinates", i);
-      //feature_locations_2d.erase(feature_locations_2d.begin()+i);
-      //continue;
-      //FIXME Use parameter here to choose whether to use
-      //FIXME Bad hack: using pixel coords
-      p3d.x = (p2d.x - point_cloud->width/2 - 0.5)  / 521.0; //Focal length of kinect
-      p3d.y = (p2d.y - point_cloud->height/2 - 0.5) / 521.0;
-    }
-
-    feature_locations_3d.push_back(Eigen::Vector4f(p3d.x, p3d.y, p3d.z, 1.0));
-    featuresUsed.push_back(index);  //save id for constructing the descriptor matrix
-    i++; //Only increment if no element is removed from vector
-    if(feature_locations_3d.size() > max_keyp) break;
-  }
-
-  //create descriptor matrix
-  int size = feature_locations_3d.size();
-  descriptors_out = cv::Mat(size, 128, CV_32F);
-  siftgpu_descriptors.resize(size * 128);
-  for (int y = 0; y < size && featuresUsed.size() > 0; ++y) {
-    int id = featuresUsed.front();
-    featuresUsed.pop_front();
-
-    for (int x = 0; x < 128; ++x) {
-      descriptors_out.at<float>(y, x) = descriptors_in[id * 128 + x];
-      siftgpu_descriptors[y * 128 + x] = descriptors_in[id * 128 + x];
-    }
-  }
-
-  feature_locations_2d.resize(feature_locations_3d.size());
-
-}
-#endif
 
 void Node::projectTo3D(std::vector<cv::KeyPoint>& feature_locations_2d,
                        std::vector<Eigen::Vector4f, Eigen::aligned_allocator<Eigen::Vector4f> >& feature_locations_3d,

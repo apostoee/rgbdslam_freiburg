@@ -1,23 +1,27 @@
 <!-- This file demonstrates the parameterization for a computer with low performance
      The openni driver is ΝΟΤ started from this file -->
 <launch>
+  <node pkg="tf" type="static_transform_publisher" name="kinect2camera" args="0 0 0 0 0 0  kinect_link camera_link 100" />
+  
   <node pkg="rgbdslam" type="rgbdslam" name="rgbdslam" cwd="node" required="true"> 
     <!-- Input data settings-->
     <param name="config/topic_image_mono"              value="/camera/rgb/image_rect_color"/> <!--could also be color -->
     <param name="config/topic_image_depth"             value="/camera/depth_registered/image_raw"/>
-    <param name="config/topic_points"                  value="/camera/depth_registered/points"/> <!--if empty, poincloud will be reconstructed from image and depth -->
+    <param name="config/topic_points"                  value=""/> <!--if empty, poincloud will be reconstructed from image and depth -->
     <param name="config/camera_info_topic"             value="/camera/rgb/camera_info"/>
+    <param name="config/fixed_frame_name"              value="/map"/>
+    <param name="config/base_frame_name"               value="/base_link"/>
 
     <param name="config/feature_detector_type"         value="ORB"/><!-- ORB are fastest and require no GPU -->
     <param name="config/feature_extractor_type"        value="ORB"/><!-- ORB are fastest and require no GPU --> 
     <param name="config/matcher_type"                  value="BRUTEFORCE"/> <!-- FLANN (not avail for ORB features), SIFTGPU (only for SIFTGPU detector)  or BRUTEFORCE-->    
-    
-    <param name="config/max_keypoints"                 value="700"/><!-- Extract no more than this many keypoints (not honored by SIFTGPU)-->
+
+    <param name="config/max_keypoints"                 value="500"/><!-- Extract no more than this many keypoints (not honored by SIFTGPU)-->
     <param name="config/min_keypoints"                 value="300"/><!-- Extract no less than this many ... -->
-    
+
     <param name="config/min_sampled_candidates"        value="5"/><!-- Frame-to-frame comparisons to random frames-->
     <param name="config/nn_distance_ratio"             value="1"/><!-- Frame-to-frame comparisons to random frames-->
-    
+
     <param name="config/store_pointclouds"             value="true"/> <!-- if, e.g., only trajectory is required, setting this to false saves lots of memory -->
 
     <param name="config/data_skip_step"                value="2"/><!-- skip every n-th frame completely -->
@@ -27,7 +31,27 @@
     <param name="config/visualization_skip_step"       value="1"/> <!-- Increase this if 3D rendering in GUI is still to slow-->
     <param name="config/octomap_resolution"            value="0.05"/><!-- 5 cm resolution renders fast enough for small maps -->
     <param name="config/maximum_depth"                 value="3.0"/><!-- Do not render points further than 3 meter in GUI and Octomap-->
-	<param name="config/optimize_landmarks"            value="true"/> <!-- Include feature poses as vertices in graph optimization-->
+    <param name="config/optimize_landmarks"            value="true"/> <!-- Include feature poses as vertices in graph optimization-->
     <param name="config/use_icp"                       value="true"/> <!-- Ignored if ICP is not compiled in (see top of CMakeLists.txt) -->
+    
+    <param name="config/individual_cloud_out_topic"    value="/rgbdslam/batch_clouds"/>;
   </node>
+  
+    <!-- Launch octomap_server for mappingL: Listens to incoming PointCloud2 data 
+    and incrementally build an octomap. The data is sent out in different representations. -->
+    <node pkg="octomap_server" type="octomap_server_node" name="color_octomap_server">
+      <param name="resolution" value="0.05" />
+      <param name="height_map" value="true" />
+      <!-- fixed map frame (set to 'map' if SLAM or localization running!) -->
+      <param name="frame_id" type="string" value="map" />
+      <!-- maximum range to integrate (speedup, accuracy) -->
+      <param name="max_sensor_range" value="6.0" />
+      <!-- Save octomap here on destruction of the server -->
+      <param name="save_directory" value="$(optenv OCTOMAP_SAVE_DIR ./)" />
+      
+      <param name="pointcloud_min_z " value="-1" />
+      <param name="pointcloud_max_z " value="2" />
+      <!-- data source to integrate (PointCloud2) -->
+      <remap from="cloud_in" to="/rgbdslam/batch_clouds" />
+    </node>
 </launch>

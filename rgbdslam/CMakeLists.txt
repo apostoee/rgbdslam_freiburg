@@ -249,3 +249,5 @@ IF (${USE_GICP})
   rosbuild_add_library(gicp external/gicp/bfgs_funcs.cpp external/gicp/gicp.cpp external/gicp/optimize.cpp external/gicp/scan.cpp external/gicp/transform.cpp)
 ENDIF (${USE_GICP})
 
+
+rosbuild_add_executable(image_converter src/image_converter.cpp)
